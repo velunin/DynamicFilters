@@ -5,20 +5,59 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using DynamicFilters.Filters;
+using DynamicFilters.Filters.RangeSelect;
 using DynamicFilters.Filters.Select;
 
 namespace DynamicFilters.Builder
 {
-    public static class FilterBuilderExtensions
+    public static partial class FilterBuilderExtensions
     {
-        public static IFilterBuilder<TModel> AddSelectFilter<TModel>(
+        public static IFilterBuilder<TModel> AddRange<TModel>(
+            this IFilterBuilder<TModel> filterBuilder, 
+            Expression<Func<TModel,object>> paramNameSelector,
+            IntRange? selectedValue, 
+            int[] values)
+        {
+            var propInfo = GetPropertyInfo(paramNameSelector);
+
+            filterBuilder.AddFilter(new IntRangeFilter
+            {
+                Name = propInfo.Name,
+                Mode = GetSelectMode(propInfo),
+                SelectedValue = selectedValue,
+                Values = values.Select(v=>new IntRange(v)).ToArray()
+            });
+
+            return filterBuilder;
+        }
+
+        public static IFilterBuilder<TModel> AddRange<TModel>(
+            this IFilterBuilder<TModel> filterBuilder,
+            Expression<Func<TModel, object>> paramNameSelector,
+            IntRange? selectedValue,
+            IntRange[] values)
+        {
+            var propInfo = GetPropertyInfo(paramNameSelector);
+
+            filterBuilder.AddFilter(new IntRangeFilter
+            {
+                Name = propInfo.Name,
+                Mode = GetSelectMode(propInfo),
+                SelectedValue = selectedValue,
+                Values = values
+            });
+
+            return filterBuilder;
+        }
+
+        public static IFilterBuilder<TModel> AddSelect<TModel>(
             this IFilterBuilder<TModel> filterBuilder,
             Expression<Func<TModel, object>> paramNameSelector,
             string selectedValue,
             string[] allValues, 
             string[] availableValues = null)
         {
-            return filterBuilder.AddSelectFilter(
+            return filterBuilder.AddSelect(
                 paramNameSelector, 
                 null, 
                 null,
@@ -27,14 +66,33 @@ namespace DynamicFilters.Builder
                 availableValues);
         }
 
-        public static IFilterBuilder<TModel> AddSelectFilter<TModel>(
+        public static IFilterBuilder<TModel> AddSelect<TModel>(
+            this IFilterBuilder<TModel> filterBuilder,
+            Expression<Func<TModel, object>> paramNameSelector,
+            Func<IntRange, string> titleSelector,
+            IntRange? selectedValue,
+            IntRange[] allValues,
+            IntRange[] availableValues = null)
+        {
+            return filterBuilder.AddSelect(
+                paramNameSelector,
+                titleSelector,
+                v => v.To.HasValue 
+                    ? $"{v.From}--{v.To.Value}" 
+                    : v.From.ToString(),
+                selectedValue,
+                allValues,
+                availableValues);
+        }
+
+        public static IFilterBuilder<TModel> AddSelect<TModel>(
             this IFilterBuilder<TModel> filterBuilder,
             Expression<Func<TModel, object>> paramNameSelector,
             int? selectedValue,
             int[] allValues,
             int[] availableValues = null)
         {
-            return filterBuilder.AddSelectFilter(
+            return filterBuilder.AddSelect(
                 paramNameSelector,
                 null, 
                 null,
@@ -43,7 +101,7 @@ namespace DynamicFilters.Builder
                 availableValues);
         }
 
-        public static IFilterBuilder<TModel> AddSelectFilter<TModel, TValue>(
+        public static IFilterBuilder<TModel> AddSelect<TModel, TValue>(
             this IFilterBuilder<TModel> filterBuilder,
             Expression<Func<TModel, object>> paramNameSelector,
             Func<TValue, string> titleSelector,
@@ -77,7 +135,7 @@ namespace DynamicFilters.Builder
             return filterBuilder;
         }
 
-        public static IFilterBuilder<TModel> AddSelectFilter<TModel,TValue>(
+        public static IFilterBuilder<TModel> AddSelect<TModel,TValue>(
             this IFilterBuilder<TModel> filterBuilder,
             Expression<Func<TModel, object>> paramNameSelector,
             Func<TValue, string> titleSelector,
@@ -94,9 +152,7 @@ namespace DynamicFilters.Builder
             var filter = new SelectFilter
             {
                 Name = propInfo.Name,
-                Mode = propInfo.IsCollection
-                    ? SelectMode.Multi
-                    : SelectMode.Single,
+                Mode = GetSelectMode(propInfo),
                 Options = allValues.Select(v => new SelectFilterItem
                 {
                     Title = titleSelector?.Invoke(v) ?? v.ToString(),
@@ -113,12 +169,18 @@ namespace DynamicFilters.Builder
 
         private static ModelPropertyInfo GetPropertyInfo<TModel>(Expression<Func<TModel, object>> paramNameSelector)
         {
-            var memderInfo = ((MemberExpression) paramNameSelector.Body).Member;
-            var propertyInfo = memderInfo as PropertyInfo;
+            var memberBody = paramNameSelector.Body as MemberExpression;
+            if (memberBody == null)
+            {
+                var ubody = (UnaryExpression) paramNameSelector.Body;
+                memberBody = ubody.Operand as MemberExpression;
+            }
+
+            var propertyInfo = memberBody.Member as PropertyInfo;
 
             if (propertyInfo == null)
             {
-                throw new InvalidOperationException($"{memderInfo.DeclaringType}.{memderInfo.Name} is not a property");
+                throw new InvalidOperationException($"{paramNameSelector.Type} is not property selector");
             }
 
             return new ModelPropertyInfo
@@ -127,6 +189,13 @@ namespace DynamicFilters.Builder
                 IsCollection = typeof(IEnumerable).IsAssignableFrom(propertyInfo.PropertyType) 
                                && propertyInfo.PropertyType != typeof(string)
             };
+        }
+
+        private static SelectMode GetSelectMode(ModelPropertyInfo propInfo)
+        {
+            return propInfo.IsCollection
+                ? SelectMode.Multi
+                : SelectMode.Single;
         }
 
         private static HashSet<TValue> GetAvailableValuesSet<TValue>(
