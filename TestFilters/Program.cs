@@ -21,9 +21,11 @@ namespace TestFilters
                 ? $"от {r.From} до {r.To.Value}" 
                 : $"от {r.From}";
 
-            var ranges = new IntRange[]
+            var ranges = new[]
             {
-                new IntRange(1,5),new IntRange(5,10),new IntRange(10)   
+                new IntRange(1,5),
+                new IntRange(5,10),
+                new IntRange(10)   
             };
 
             var builder = new FilterBuilder<Model>();
